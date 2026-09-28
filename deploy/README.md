@@ -7,3 +7,7 @@
 生成密码哈希可交互运行 `docker run --rm -it caddy:2-alpine caddy hash-password`，不要把明文密码写进命令参数。`docker compose config --quiet` 只检查配置，`docker compose up -d --build` 会实际启动服务。请自行验证证书、认证、来源状态和持续采集后再使用。
 
 备份前停止 reader；禁止随意使用 `docker compose down -v`，该操作会移除数据卷。默认单人数据空间，不支持多用户隔离或多实例共用 JSON。
+
+## hk 共享 Caddy
+
+hk 使用已有的 `web-proxy` Docker 网络和全局 Caddy 容器。部署时使用 `deploy/docker-compose.hk.yml`，它只启动 reader 并以 `signal-reader:4317` 连接共享网络；域名、HTTPS 与访问控制必须由全局 Caddy 的配置管理。
