@@ -1,4 +1,5 @@
 import json
+import io
 import unittest
 import urllib.parse
 import urllib.error
@@ -18,11 +19,13 @@ class ReadingTextTests(unittest.TestCase):
             with patch.object(features,'TRANSLATIONS',{key:bad}):self.assertIsNone(features.translated(source))
 
     def test_rate_limit_pauses_other_translation_requests(self):
+        fp=io.BytesIO()
         def limited(url):
-            raise urllib.error.HTTPError(url,429,'Too Many Requests',{'Retry-After':'600'},None)
+            raise urllib.error.HTTPError(url,429,'Too Many Requests',{'Retry-After':'600'},fp)
         with patch.object(features,'TRANSLATION_PAUSE_UNTIL',0), patch.object(features,'TRANSLATIONS',{}), patch.object(features,'RETRY',{}):
             features.translate_one('Fresh example one',limited)
             self.assertEqual(features.translation_status()['status'],'rate_limited')
+            self.assertTrue(fp.closed)
             def unexpected(url):self.fail('Global cooldown must suppress later calls')
             features.translate_one('Fresh example two',unexpected)
 

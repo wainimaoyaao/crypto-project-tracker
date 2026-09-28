@@ -37,6 +37,8 @@ def annotate(e,current):
    e['topic']=topic;e['high']=high and e['freshness']=='recent';e['priorityReason']='文本命中「'+topic+'」规则，待阅读原文确认';break
  if e['freshness']=='archive':e['priorityReason']='历史内容，不作为新快讯提醒'
  if e['freshness']=='unknown':e['priorityReason']='发布时间未知，不作为新快讯提醒'
+ if e.get('providerMismatch'):
+  e['high']=False;e['priorityReason']='提供方币种映射与正文提及不一致，仅作参考；需核对原文'
  e['channel']=e.get('channel') or ('x' if e.get('source','').startswith('X ·') else 'official' if '官网' in e.get('source','') or 'RSS' in e.get('source','') else 'opennews')
  e['evidence']='团队成员个人表述' if e['channel']=='team' else '官方账号表述' if e['channel']=='x' else '官网表述' if e['channel']=='official' else '媒体 / 聚合转述'
  return e

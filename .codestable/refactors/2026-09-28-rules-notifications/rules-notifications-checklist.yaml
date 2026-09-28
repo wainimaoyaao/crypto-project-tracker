@@ -1,0 +1,28 @@
+refactor: 2026-09-28-rules-notifications
+status: complete
+steps:
+  - id: step-1
+    title: 拆出规则页的命名渲染片段
+    method: M-L2-01
+    status: done
+  - id: step-2
+    title: 将浏览器通知封装为显式控制器
+    method: M-L3-07
+    status: done
+  - id: step-3
+    title: 以规则页扩展注册替换 renderRules 覆盖
+    method: M-L1-01
+    status: done
+checks:
+  - id: rules-ui-regression
+    description: 规则数量、规则卡片、触发记录、通知面板和规则表单保持当前行为。
+    status: passed
+  - id: notification-regression
+    description: 过期过滤、去重和启用后不补发历史提醒保持当前语义。
+    status: passed
+  - id: explicit-composition
+    description: notifications.js 不再覆盖 renderRules，规则模块通过命名扩展入口组合通知面板。
+    status: passed
+  - id: visual-rules-page
+    description: 在浏览器规则页确认通知面板、授权按钮、编辑、删除和暂停操作。
+    status: passed

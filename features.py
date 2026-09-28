@@ -69,6 +69,10 @@ def translate_one(text,request):
     try:delay=max(300,min(3600,int(error.headers.get('Retry-After','900'))))
     except (ValueError,TypeError,AttributeError):delay=900
     TRANSLATION_PAUSE_UNTIL=time.time()+delay
+  close=getattr(error,'close',None)
+  if close:
+   try:close()
+   except Exception:pass
 
 def translation_status():
  with TLOCK:

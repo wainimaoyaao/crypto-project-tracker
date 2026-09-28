@@ -30,6 +30,8 @@ ALERT_STORE=alerts.Store(config.DATA_DIR/'alerts.json')
 PREFERENCES=preferences.Store(config.DATA_DIR/'preferences.json')
 CHART_CACHE={}
 CHART_LOCK=threading.Lock()
+CHART_INFLIGHT={}
+CHART_ERRORS={}
 PROJECTS=[
  dict(id='soon',name='SOON',symbol='SOON',account='soon_svm',website='https://soon.foundation/',bg='#e2e9fa',color='#586bb6',mark='S'),
  dict(id='near',name='NEAR Protocol',symbol='NEAR',account='NEARProtocol',website='https://www.near.org/',bg='#e0efe8',color='#3a7257',mark='N'),
@@ -61,6 +63,9 @@ for project in PROJECTS:
  QUERIES.setdefault(project['id'],'"'+project['name']+'" OR "$'+project['symbol']+'"')
 LOCK=threading.Lock()
 DATA={'projects':PROJECTS,'markets':{},'events':[],'sources':{},'social':{},'updatedAt':None,'refreshing':True,'collectors':{}}
+EVENTS_REV=0
+CLUSTER_CACHE={'key':None,'value':None}
+CLUSTER_COMPUTE_LOCK=threading.Lock()
 CACHE=config.DATA_DIR/'live-cache.json'
 TOKEN=os.environ.get('OPENNEWS_TOKEN','')
 # Only load a configuration path explicitly supplied to this application; never search other projects.
@@ -69,16 +74,28 @@ if os.environ.get('SIGNAL_ENV_FILE'):
   if line.startswith('OPENNEWS_TOKEN='): TOKEN=line.split('=',1)[1].strip().strip('"\'')
 
 def now():return int(time.time()*1000)
+class CrossHostRedirectBlocked(urllib.request.HTTPRedirectHandler):
+ """Auth requests must never forward the Bearer token outside its HTTPS origin."""
+ def origin(self,url):
+  parts=urllib.parse.urlsplit(url);scheme=parts.scheme.lower();port=parts.port or (443 if scheme=='https' else 80 if scheme=='http' else None)
+  return scheme,(parts.hostname or '').lower(),port
+ def redirect_request(self,req,fp,code,msg,headers,newurl):
+  if self.origin(req.full_url)!=self.origin(newurl):
+   raise urllib.error.HTTPError(req.full_url,code,'认证请求跨 origin 重定向已阻断',headers,fp)
+  return super().redirect_request(req,fp,code,msg,headers,newurl)
+_OPENERS={'plain':urllib.request.build_opener(),'auth':urllib.request.build_opener(CrossHostRedirectBlocked())}
 def request(url,payload=None):
  headers={'User-Agent':'SignalReader/0.2','Accept':'application/json, application/xml, text/html'}
+ opener=_OPENERS['plain']
  if url.startswith('https://ai.6551.io/'):
   if not TOKEN:raise ValueError('missing_credential')
   headers['Authorization']='Bearer '+TOKEN
+  opener=_OPENERS['auth']
  raw=json.dumps(payload).encode() if payload is not None else None
  if raw:headers['Content-Type']='application/json'
  for attempt in range(2):
   try:
-   with urllib.request.urlopen(urllib.request.Request(url,data=raw,headers=headers),timeout=18) as r:return r.read(6_000_000).decode('utf-8')
+   with opener.open(urllib.request.Request(url,data=raw,headers=headers),timeout=18) as r:return r.read(6_000_000).decode('utf-8')
   except urllib.error.HTTPError as e:
    # Authorization failures are final; only retry temporary read-query failures.
    if attempt or e.code not in [502,503,504]:raise
@@ -199,15 +216,28 @@ def provider_news(p):
      if not tid.isdigit() or author.lower()!=p['account'].lower():continue
      e=news_event(p['id'],row.get('text','')[:140],'https://x.com/'+author+'/status/'+tid,timestamp(row.get('createdAt','')),'X · @'+author,row.get('text',''))
     else:
-     url=row.get('link','');text=row.get('text','');coins=[x.get('symbol','').upper() for x in (row.get('coins') or [])]
-     # The provider's coin mapping is necessary, but ambiguous English words alone are insufficient.
-     if not url.startswith('https://') or not relevant(p['id'],text,p):continue
+     url=row.get('link','');text=row.get('text','');coins=[x.get('symbol','').upper() for x in (row.get('coins') or []) if x.get('symbol','')]
+     if not url.startswith('https://'):continue
+     # The provider coin mapping, when present, is authoritative for the coin query;
+     # the keyword query may add body matches but must expose conflicting provider mappings.
+     provider_mismatch=bool(coins) and p['symbol'].upper() not in coins
+     if name=='OpenNews':
+      if coins:
+       if provider_mismatch:continue
+      elif not relevant(p['id'],text,p):continue
+     elif not relevant(p['id'],text,p):continue
      e=news_event(p['id'],text[:140],url,timestamp(row.get('ts')),str(row.get('newsType','OpenNews')),text)
+     if provider_mismatch and name!='OpenNews':e['providerMismatch']=True
     e['channel']='x' if name=='OpenTwitter' else 'opennews'
     if name!='OpenTwitter':
      rating=row.get('aiRating') or {}
      e['providerRating']={'score':rating.get('score'),'summary':rating.get('summary'),'status':rating.get('status')}
-     e['matchReason']='官方名称 / 标识匹配；'+('币种检索' if name=='OpenNews' else '关键词补充检索')
+     if name=='OpenNews':
+      e['matchReason']='币种检索；'+('提供方币种映射包含 '+p['symbol'] if coins else '提供方未给币种映射，按正文名称匹配')
+     elif e.get('providerMismatch'):
+      e['matchReason']='关键词补充检索：正文提及 '+p['symbol']+'，但提供方将该内容归入其他币种（'+'、'.join(coins)+'），需核对原文'
+     else:
+      e['matchReason']='关键词补充检索：正文提及，无提供方币种冲突'
     out.append(e)
    statuses[name]={'status':'ok','count':len(out)-before_count,'returnedCount':len(rows),'lastSuccessAt':now(),'message':'分页首批检索，非完整历史；结果经项目标识过滤'}
   except Exception as e:statuses[name]={'status':'error','message':error_label(e)}
@@ -234,9 +264,22 @@ def collector_status(name,**fields):
  with LOCK:DATA['collectors'].setdefault(name,{}).update(fields)
 
 def store_news(pid,items,status):
+ global EVENTS_REV
  with LOCK:
   merged,sources=merge_news([e for e in DATA['events'] if e['p']==pid],items,status,DATA['sources'].get(pid,{}),now())
-  DATA['events']=[e for e in DATA['events'] if e['p']!=pid]+merged;DATA['sources'][pid]=sources
+  DATA['events']=[e for e in DATA['events'] if e['p']!=pid]+merged;DATA['sources'][pid]=sources;EVENTS_REV+=1
+
+def clustered_news():
+ """Curated+clustered news, reused across live polls and alert ticks until inputs change."""
+ with LOCK:
+  events=list(DATA['events']);projects=list(PROJECTS);rev=EVENTS_REV
+ key=(rev,len(projects),tuple((p['id'],p.get('name'),p.get('symbol')) for p in projects),now()//900000)
+ if CLUSTER_CACHE['key']==key:return CLUSTER_CACHE['value']
+ with CLUSTER_COMPUTE_LOCK:
+  if CLUSTER_CACHE['key']==key:return CLUSTER_CACHE['value']
+  value=cluster(curate(events,projects=projects))
+  CLUSTER_CACHE.update(key=key,value=value)
+  return value
 
 def loop():
  while True:
@@ -297,8 +340,8 @@ def alert_snapshot():
 def alert_loop():
  while True:
   try:
-   with LOCK:
-    markets=dict(DATA['markets']);news=cluster(curate(list(DATA['events']),projects=PROJECTS))
+   news=clustered_news()
+   with LOCK:markets=dict(DATA['markets'])
    pairs={(r['p'],r['period']) for r in ALERT_STORE.snapshot()['rules'] if r['on'] and r['type'] in {'ema','level','combo'} and r['period']!='4h'}
    for pid,period in pairs:
     try:markets[(pid,period)]=alerts.chart_market(markets.get(pid),chart_data(pid,period))
@@ -366,12 +409,33 @@ def chart_data(pid,period):
  project=next((p for p in PROJECTS if p['id']==pid),None)
  if not project or period not in charts.PERIODS:raise ValueError('项目或周期无效')
  key=(pid,period)
- with CHART_LOCK:
-  cached=CHART_CACHE.get(key)
-  if cached and now()-cached['fetchedAt']<60000:return cached
+ while True:
+  with CHART_LOCK:
+   cached=CHART_CACHE.get(key)
+   if cached and now()-cached['fetchedAt']<60000:return cached
+   wait=CHART_INFLIGHT.get(key)
+   if wait is None:
+    CHART_INFLIGHT[key]=threading.Event();owner=True
+   else:owner=False
+  if owner:break
+  wait.wait(25)
+  with CHART_LOCK:
+   error=CHART_ERRORS.get(key)
+   if error and now()-error<10000:raise RuntimeError('图表来源暂不可用，请稍后重试')
+ # Network I/O and computation stay outside the lock; one fetch per key coordinates waiters.
+ try:
   rows=api('/fapi/v1/klines',{'symbol':project['symbol']+'USDT','interval':period,'limit':1500})
   if not isinstance(rows,list):raise ValueError('K 线数据不可用')
-  result=charts.snapshot(rows,period,now(),ema);CHART_CACHE[key]=result;return result
+  result=charts.snapshot(rows,period,now(),ema)
+  with CHART_LOCK:CHART_CACHE[key]=result;CHART_ERRORS.pop(key,None)
+  return result
+ except Exception:
+  with CHART_LOCK:CHART_ERRORS[key]=now()
+  raise
+ finally:
+  with CHART_LOCK:
+   event=CHART_INFLIGHT.pop(key,None)
+   if event:event.set()
 
 class Handler(SimpleHTTPRequestHandler):
  def __init__(self,*args,**kwargs):super().__init__(*args,directory=str(ROOT/'dist'),**kwargs)
@@ -393,7 +457,8 @@ class Handler(SimpleHTTPRequestHandler):
    except Exception:self.json_response({'error':'搜索服务暂不可用，可以手动填写项目信息'},502)
    return
   if self.path=='/api/live':
-   with LOCK:body=json.dumps({**DATA,'events':[features.localize(e) for e in cluster(curate(DATA['events'],projects=PROJECTS))],'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
+   events_payload=[features.localize(e) for e in clustered_news()]
+   with LOCK:body=json.dumps({**DATA,'events':events_payload,'social':{pid:{**v,'discussants':[{**a,'textZh':features.translated(a.get('text',''))} for a in v.get('discussants',[]) if features.eligible_discussant(a) and a.get('publishedAt') and now()-7*86400000<=a['publishedAt']<=now()+300000]} for pid,v in DATA.get('social',{}).items()},'alertState':alert_snapshot(),'serverTime':now(),'translation':features.translation_status(),'cadence':{'marketSeconds':60,'newsSeconds':1800}},ensure_ascii=False).encode()
    self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
   if self.path.split('?')[0] not in ['/','/index.html','/style.css','/live.js','/project.js','/rules.js','/watchlist.js','/charts.js','/notifications.js','/preferences.js','/reorder.js','/source-status.js','/reading-updates.js']:
    self.send_error(404);return

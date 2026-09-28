@@ -16,7 +16,7 @@ test('new progress revives a read event once but a duplicate report does not',()
 test("newly fetched historical news does not masquerade as a recent update",()=>{assert.equal(catchupItems([{...item,publishedAt:10,discoveredAt:150}],["near"],[],{},100,200).length,0)});
 
 test('alert links open the matching event or chart without guessing absent URLs',()=>{
- const handlers={},nodes={},opened=[],notices=[];
+ const handlers={},nodes={},opened=[],notices=[],detailExtensions=[],renderExtensions=[];
  const ctx={
   document:{visibilityState:'visible',addEventListener:(name,fn)=>handlers[name]=fn,querySelectorAll:()=>[],querySelector:()=>({scrollIntoView(){}})},
   window:{addEventListener(){}},localStorage:{getItem:()=>null,setItem(){}},setInterval(){},
@@ -24,10 +24,13 @@ test('alert links open the matching event or chart without guessing absent URLs'
   state:{view:'rules',projects:['near'],read:[]},catalog:[],originalSelections:new Set(),
   liveData:{alertState:{alerts:[{id:'missing',type:'news',evidence:{}},{id:'news',type:'news',evidence:{eventId:'specific'}},{id:'market',type:'oi',p:'near',evidence:{source:'Binance'}}]}},
   filteredEvents:()=>[],eventCard:()=>'',openDetail:id=>opened.push(id),render(){},persist(){},
+  registerDetailExtension:extension=>detailExtensions.push(extension),registerRenderExtension:extension=>renderExtensions.push(extension),
   $:selector=>nodes[selector]||(nodes[selector]={value:'',insertAdjacentHTML(){}}),
   escapeHtml:String,formatTime:String,ruleDescription:()=>'',safeUrl:String,toast:t=>notices.push(t),chartSettings:{period:'1d'},newsSource:'team'
  };
  vm.runInNewContext(fs.readFileSync('dist/reading-updates.js','utf8'),ctx);
+ assert.equal(detailExtensions.length,1);
+ assert.equal(renderExtensions.length,1);
  const click=id=>handlers.click({target:{closest:()=>({dataset:{alertContext:id},hasAttribute:()=>false})}});
  click('missing');assert.equal(opened.length,0);assert.equal(notices.length,1);
  click('news');assert.deepEqual(opened,[2]);assert.ok(ctx.state.read.length===0);

@@ -1,0 +1,28 @@
+refactor: 2026-09-28-project-charts
+status: complete
+steps:
+  - id: step-1
+    title: 拆分项目页的结构化渲染片段
+    method: M-L2-01
+    status: done
+  - id: step-2
+    title: 形成关联图表控制器
+    method: M-L3-07
+    status: done
+  - id: step-3
+    title: 以项目页扩展注册替换图表 render 覆盖
+    method: M-L1-01
+    status: done
+checks:
+  - id: project-page-regression
+    description: 项目头、行情、团队账号和讨论者区保持当前 HTML 与交互。
+    status: passed
+  - id: chart-regression
+    description: 图表缓存、请求、周期、刷新、新闻标记和错误呈现保持当前语义。
+    status: passed
+  - id: explicit-project-composition
+    description: charts.js 不再覆盖 render，图表通过项目页扩展注册挂载。
+    status: passed
+  - id: visual-project-chart
+    description: 浏览器中切换项目、周期和图表新闻标记后项目页保持正确。
+    status: passed

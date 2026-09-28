@@ -34,11 +34,14 @@ def evaluate(rule,runtime,market,news,now):
  if kind=='news':
   runtime['status']='watching'
   for e in sorted(news,key=lambda x:x.get('publishedAt') or 0):
-   if e['p']!=rule['p'] or not e.get('high'):continue
+   if e['p']!=rule['p']:continue
+   # Records whose provider coin mapping conflicts with the body text never alert (attribution unresolved).
+   if e.get('providerMismatch'):continue
    date=e.get('publishedAt')
-   if date and rule['createdAt']<date<=now and now-date<=86400000:
+   if e.get('high') and date and rule['createdAt']<date<=now and now-date<=86400000:
     key='news:'+e['id']
     emit(key,e.get('titleZh') or e['title'],{'eventId':e['id'],'source':e.get('source'),'url':e.get('url'),'publishedAt':date,'reason':e.get('priorityReason'),'note':'文本规则命中的重点候选，未经独立核实'})
+   # A later development can be significant even when the original story was not a high-priority anchor.
    for update in e.get('progressCandidates',[]):
     date=update.get('publishedAt')
     if date and rule['createdAt']<date<=now and now-date<=86400000:

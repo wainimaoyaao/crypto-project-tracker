@@ -18,7 +18,8 @@
   for(const k of fields)if(!equal(current[k],observed[k])){desired[k]=clone(current[k]);dirty=true}
   observed=current;if(dirty){status('偏好待同步…');flush()}
  };
- const priorRender=render;render=function(){priorRender();status(message)};
+ function renderPreferenceStatus(){status(message)}
+ registerRenderExtension(renderPreferenceStatus);
  async function flush(){
   if(!ready||busy||!dirty)return;busy=true;
   try{

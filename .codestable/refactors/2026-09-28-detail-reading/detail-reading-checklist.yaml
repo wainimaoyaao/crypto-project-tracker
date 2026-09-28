@@ -1,0 +1,28 @@
+refactor: 2026-09-28-detail-reading
+status: complete
+steps:
+  - id: step-1
+    title: 拆出项目详情增强函数
+    method: M-L2-01
+    status: done
+  - id: step-2
+    title: 形成阅读详情控制器
+    method: M-L3-07
+    status: done
+  - id: step-3
+    title: 以详情扩展注册替换 openDetail 覆盖
+    method: M-L1-01
+    status: done
+checks:
+  - id: detail-regression
+    description: 新闻详情的质量证据、语言切换和时间线，以及行情详情的基座行为保持不变。
+    status: passed
+  - id: reading-regression
+    description: 阅读版本落盘、已读事件进展、历史新闻过滤和提醒上下文保持当前语义。
+    status: passed
+  - id: explicit-detail-composition
+    description: project.js 和 reading-updates.js 不再覆盖 openDetail，详情增强通过命名扩展注册运行。
+    status: passed
+  - id: visual-detail-flow
+    description: 浏览器中依次确认新闻、带关联报道的新闻和行情详情。
+    status: passed

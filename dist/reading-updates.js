@@ -27,18 +27,22 @@ if(typeof document!=='undefined'){
  eventCard=function(e){let html=oldCard(e);const changed=state.read.includes(e.id)&&versions[e.id]!==undefined&&versions[e.id]!==progressVersion(e);
   return html.replace('<div class="event-bottom">',translationNotice(e)+(changed?'<p class="translation-note">已读事件有新增进展</p>':'')+'<div class="event-bottom">');
  };
- const oldDetail=openDetail;
- openDetail=function(id){const e=events.find(x=>x.id===id);if(e){versions[id]=progressVersion(e);saveLedger()}oldDetail(id);if(!e||e.type!=='news')return;
-  const footer=$('#detail-content .modal-footer');footer?.insertAdjacentHTML('beforebegin',translationNotice(e));
-  if(e.relatedItems?.length){
-   // Replace the old related-report block with one chronological timeline.
-   document.querySelectorAll('#detail-content .quality-evidence').forEach(n=>{if(n.textContent.includes('相关报道与各方表述'))n.remove()});
-   const timeline=e.relatedItems.slice().sort((a,b)=>(a.publishedAt||0)-(b.publishedAt||0));
-   footer?.insertAdjacentHTML('beforebegin',`<section class="event-timeline"><h3>同一事件的时间线</h3><p class="module-note">${escapeHtml(e.clusterReason||'保留各方原文；不代表独立证实')}。新增表述属于待核对候选。</p>${timeline.map((item,i)=>{const u=(e.progressCandidates||[]).find(x=>x.url===item.url&&x.publishedAt===item.publishedAt);const role=item.channel==='team'?'团队表述':item.channel==='x'?'官方账号':item.channel==='opennews'?'聚合报道':'来源报道';return `<details ${u||i===0?'open':''} class="related-report"><summary>${formatTime(item.publishedAt)} · ${escapeHtml(role)} · ${escapeHtml(item.source)} ${u?'· 新增进展':''}</summary>${u?`<div class="evidence">新增表述：${escapeHtml(u.signals.join('、'))}</div>`:''}<p>${escapeHtml(originalSelections.has(id)?item.summary:(item.summaryZh??item.summary))}</p>${!item.summaryZh?'<small>此段为原文，译文待就绪</small>':''}<a class="evidence-link" target="_blank" rel="noopener noreferrer" href="${escapeHtml(safeUrl(item.url))}">核对这条原文 ↗</a></details>`}).join('')}</section>`);
+ function createReadingDetailController(){
+  function beforeOpen(event){if(event){versions[event.id]=progressVersion(event);saveLedger()}}
+  function afterOpen(event,{footer}){if(!event||event.type!=='news')return;
+   footer?.insertAdjacentHTML('beforebegin',translationNotice(event));
+   if(event.relatedItems?.length){
+    // Replace the old related-report block with one chronological timeline.
+    document.querySelectorAll('#detail-content .quality-evidence').forEach(node=>{if(node.textContent.includes('相关报道与各方表述'))node.remove()});
+    const timeline=event.relatedItems.slice().sort((a,b)=>(a.publishedAt||0)-(b.publishedAt||0));
+    footer?.insertAdjacentHTML('beforebegin',`<section class="event-timeline"><h3>同一事件的时间线</h3><p class="module-note">${escapeHtml(event.clusterReason||'保留各方原文；不代表独立证实')}。新增表述属于待核对候选。</p>${timeline.map((item,index)=>{const update=(event.progressCandidates||[]).find(candidate=>candidate.url===item.url&&candidate.publishedAt===item.publishedAt);const role=item.channel==='team'?'团队表述':item.channel==='x'?'官方账号':item.channel==='opennews'?'聚合报道':'来源报道';return `<details ${update||index===0?'open':''} class="related-report"><summary>${formatTime(item.publishedAt)} · ${escapeHtml(role)} · ${escapeHtml(item.source)} ${update?'· 新增进展':''}</summary>${update?`<div class="evidence">新增表述：${escapeHtml(update.signals.join('、'))}</div>`:''}<p>${escapeHtml(originalSelections.has(event.id)?item.summary:(item.summaryZh??item.summary))}</p>${!item.summaryZh?'<small>此段为原文，译文待就绪</small>':''}<a class="evidence-link" target="_blank" rel="noopener noreferrer" href="${escapeHtml(safeUrl(item.url))}">核对这条原文 ↗</a></details>`}).join('')}</section>`);
+   }
   }
- };
- const oldRender=render;
- render=function(){for(const e of events){if(state.read.includes(e.id)&&versions[e.id]===undefined)versions[e.id]=progressVersion(e)}oldRender();
+  return {beforeOpen,afterOpen};
+ }
+ const readingDetail=createReadingDetailController();
+ registerDetailExtension(readingDetail);
+ function renderReadingPage(){for(const e of events){if(state.read.includes(e.id)&&versions[e.id]===undefined)versions[e.id]=progressVersion(e)}
   const items=freshItems();
   if(state.view==='feed'&&!state.project){
    const groups=catalog.filter(p=>state.projects.includes(p.id)).map(p=>({p,items:items.filter(e=>e.p===p.id)})).filter(g=>g.items.length);
@@ -54,7 +58,8 @@ if(typeof document!=='undefined'){
   if(alertContext&&state.project===alertContext.p){
    const a=alertContext;$('#project-overview').insertAdjacentHTML('afterbegin',`<div class="alert-context evidence">正在回看提醒 · ${escapeHtml(a.ruleName)} · ${formatTime(a.at)}<br>${escapeHtml(a.title)}<br>图表展示当前所选窗口；触发时数值以原始记录为准。<button class="text-button" data-alert-back>返回触发记录</button></div>`);
   }
- };
+ }
+ registerRenderExtension(renderReadingPage);
  document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   if(b.hasAttribute('data-catchup-toggle')){catchupOnly=!catchupOnly;render()}
   if(b.hasAttribute('data-catchup-read')){for(const item of freshItems()){if(!state.read.includes(item.id))state.read.push(item.id);versions[item.id]=progressVersion(item)}state.read=state.read.slice(-5000);saveLedger();persist();render()}

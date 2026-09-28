@@ -1,0 +1,35 @@
+refactor: 2026-09-28-render-orchestration
+status: complete
+steps:
+  - id: step-1
+    title: 在 live 基座建立 render 扩展注册
+    method: M-L1-01
+    status: done
+  - id: step-2
+    title: 将项目页登记为 render 扩展
+    method: M-L1-01
+    status: done
+  - id: step-3
+    title: 将偏好状态更新登记为 render 扩展
+    method: M-L2-04
+    status: done
+  - id: step-4
+    title: 将阅读回顾登记为 render 扩展
+    method: M-L3-07
+    status: done
+checks:
+  - id: render-chain-regression
+    description: 收件箱、实时状态、项目页、规则页、项目图表和通知面板保持当前行为。
+    status: passed
+  - id: preference-regression
+    description: 偏好本机编辑、同步、冲突与失败文案保持当前语义。
+    status: passed
+  - id: reading-regression
+    description: 阅读版本、catchup、规则记录和提醒回看保持当前语义。
+    status: passed
+  - id: explicit-render-composition
+    description: live、project、preferences 和 reading-updates 不再通过同名 render 覆盖组合。
+    status: passed
+  - id: visual-full-render-flow
+    description: 浏览器中确认收件箱、规则页、项目页、偏好状态、catchup 与提醒回看。
+    status: passed

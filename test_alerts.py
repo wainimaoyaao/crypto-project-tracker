@@ -1,6 +1,7 @@
 import tempfile,unittest
 from pathlib import Path
 from alerts import Store,evaluate,validate
+from event_clusters import cluster
 NOW=1800000000000
 class AlertTests(unittest.TestCase):
  def rule(self,kind='price'):
@@ -32,6 +33,32 @@ class AlertTests(unittest.TestCase):
   r=self.rule('news');rt={};e={'id':'n','p':'near','publishedAt':NOW-2000,'high':True,'title':'Old story','progressCandidates':[{'key':'v2','publishedAt':NOW,'url':'https://example.org/update','reason':'New amount','signals':['$200 million']}]}
   self.assertEqual(len(evaluate(r,rt,{},[e],NOW+1)),1)
   self.assertEqual(evaluate(r,rt,{},[e],NOW+3600001),[])
+ def test_progress_candidates_fire_even_when_anchor_is_not_high(self):
+  r=self.rule('news');rt={};e={'id':'n','p':'near','publishedAt':NOW-2000,'high':False,'title':'Ordinary notice','progressCandidates':[{'key':'v2','publishedAt':NOW,'url':'https://example.org/update','reason':'New state','signals':['暂停']}]}
+  fired=evaluate(r,rt,{},[e],NOW+1)
+  self.assertEqual(len(fired),1)
+  self.assertEqual(fired[0]['title'],'项目事件出现后续进展候选')
+  self.assertEqual(evaluate(r,rt,{},[e],NOW+3600001),[])
+ def test_plain_low_priority_anchor_without_progress_stays_silent(self):
+  r=self.rule('news');rt={};e={'id':'n','p':'near','publishedAt':NOW-2000,'high':False,'title':'Ordinary notice'}
+  self.assertEqual(evaluate(r,rt,{},[e],NOW+1),[])
+ def test_provider_mismatch_records_never_alert(self):
+  r=self.rule('news');rt={};e={'id':'n','p':'near','publishedAt':NOW-2000,'high':True,'title':'Flagged story','providerMismatch':True,'progressCandidates':[{'key':'v2','publishedAt':NOW,'url':'https://example.org/update','reason':'New amount','signals':['$200 million']}]}
+  self.assertEqual(evaluate(r,rt,{},[e],NOW+1),[])
+ def test_provider_mismatch_progress_is_excluded_after_grouping(self):
+  r=self.rule('news');url='https://example.org/source-document';anchor={'id':'anchor','p':'near','publishedAt':NOW-2000,'summary':'NEAR product notice','url':url,'high':False,'title':'Ordinary notice'}
+  mismatched={**anchor,'id':'mismatch','publishedAt':NOW,'summary':'NEAR product notice has paused withdrawals','providerMismatch':True}
+  grouped=cluster([anchor,mismatched])[0]
+  self.assertEqual(grouped['progressCandidates'],[])
+  self.assertEqual(evaluate(r,{}, {},[grouped],NOW+1),[])
+  high_anchor={**anchor,'id':'high-anchor','high':True}
+  grouped=cluster([high_anchor,mismatched])[0]
+  self.assertTrue(grouped['providerMismatch'])
+  self.assertEqual(evaluate(r,{}, {},[grouped],NOW+1),[])
+  trusted={**mismatched,'id':'trusted','providerMismatch':False}
+  grouped=cluster([anchor,trusted])[0]
+  self.assertEqual(len(grouped['progressCandidates']),1)
+  self.assertEqual(len(evaluate(r,{}, {},[grouped],NOW+1)),1)
  def test_record_and_dedupe_survive_store_restart(self):
   with tempfile.TemporaryDirectory() as d:
    path=Path(d)/'alerts.json';store=Store(path);r=self.rule();r.pop('id');saved=store.upsert(r,['near'])
